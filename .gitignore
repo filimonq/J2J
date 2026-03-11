@@ -122,3 +122,5 @@ replay_pid*
 
 .gradle/
 build/
+
+storage.json
