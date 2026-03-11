@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import j2j.annotation.Id;
 import j2j.annotation.Persistent;
+import j2j.id.IdGenerationStrategy;
 
 import java.lang.reflect.Field;
 
@@ -25,7 +26,10 @@ import java.lang.reflect.Field;
 public class J2JSerializer {
 
     private final ObjectMapper mapper = new ObjectMapper();
-
+    private final IdGenerationStrategy idStrategy;
+    public J2JSerializer(IdGenerationStrategy idStrategy) {
+        this.idStrategy = idStrategy;
+    }
     /**
      * Serializes the given @Persistent object to a JSONL string.
      *
@@ -51,11 +55,17 @@ public class J2JSerializer {
 
         try {
             ObjectNode node = mapper.createObjectNode();
-
             node.put("type", clazz.getSimpleName());
 
             idField.setAccessible(true);
             Long idValue = (Long) idField.get(obj);
+
+            // Генерируем ID если нужно
+            if (idValue == null && idStrategy != null) {
+                idValue = idStrategy.generateId();
+                idField.set(obj, idValue);  // <-- присваиваем объекту!
+            }
+
             if (idValue == null) {
                 node.putNull("id");
             } else {

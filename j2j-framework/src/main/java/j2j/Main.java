@@ -1,5 +1,7 @@
 package j2j;
 
+import j2j.id.CounterIdStrategy;
+import j2j.id.UuidIdStrategy;
 import j2j.model.User;
 import j2j.serializer.J2JSerializer;
 import j2j.serializer.J2JSerializationException;
@@ -7,13 +9,13 @@ import j2j.serializer.J2JSerializationException;
 public class Main {
 
     public static void main(String[] args) {
-        J2JSerializer serializer = new J2JSerializer();
+        J2JSerializer serializer = new J2JSerializer(new UuidIdStrategy());
 
         User u1 = new User("Anna", 19, true);
-        u1.setId(1L);
+        //u1.setId(1L);
 
         User u2 = new User("Bob", 25, false);
-        u2.setId(2L);
+        //u2.setId(2L);
 
         System.out.println(serializer.serialize(u1));
         System.out.println(serializer.serialize(u2));
