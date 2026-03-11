@@ -60,10 +60,9 @@ public class J2JSerializer {
             idField.setAccessible(true);
             Long idValue = (Long) idField.get(obj);
 
-            // Генерируем ID если нужно
             if (idValue == null && idStrategy != null) {
                 idValue = idStrategy.generateId();
-                idField.set(obj, idValue);  // <-- присваиваем объекту!
+                idField.set(obj, idValue);
             }
 
             if (idValue == null) {
