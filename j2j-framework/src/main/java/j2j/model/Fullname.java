@@ -1,10 +1,17 @@
 package j2j.model;
 
+import j2j.annotation.Id;
+import j2j.annotation.Persistent;
+
+@Persistent
 public class Fullname {
-    private String name;
-    private String surname;
+    @Id
+    private Long id;
+    public String name;
+    public String surname;
     public Fullname(String name, String surname) {
         this.name = name;
         this.surname = surname;
     }
+    public Fullname() {}
 }

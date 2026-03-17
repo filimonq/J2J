@@ -2,28 +2,30 @@ package j2j.model;
 
 import j2j.annotation.Id;
 import j2j.annotation.Persistent;
+import j2j.annotation.Reference;
 
 @Persistent
 public class User {
 
     @Id
     private Long id;
-
-    private String name;
+    @Reference
+    private Fullname name;
     private int age;
     private boolean active;
 
-    public User(String name, int age, boolean active) {
+    public User(Fullname name, int age, boolean active) {
         this.name = name;
         this.age = age;
         this.active = active;
     }
+    public User(){}
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public Fullname getName() { return name; }
+    public void setName(Fullname name) { this.name = name; }
 
     public int getAge() { return age; }
     public void setAge(int age) { this.age = age; }

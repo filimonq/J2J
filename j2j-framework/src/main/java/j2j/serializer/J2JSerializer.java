@@ -4,36 +4,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import j2j.annotation.Id;
 import j2j.annotation.Persistent;
+import j2j.annotation.Reference;
 
 import java.lang.reflect.Field;
 
 /**
  * Serializes a @Persistent object into a single JSON line (JSONL format).
  *
- * Output example:
- *   {"type":"User","id":1,"name":"Anna","age":19,"active":true}
- *
- * Responsibilities of THIS class:
- *   - Validate that the class is @Persistent                  → exception if not
- *   - Validate that exactly one @Id field exists (type Long)  → exception if not
- *   - Convert the object fields to a JSON string
- *
- * NOT a responsibility of this class:
- *   - Generating or validating the ID value — that's the PersistenceManager's job
- *   - Writing to file — that's the FileStorage's job
+ * Now supports:
+ *   - Embedded objects (default)
+ *   - References via @Reference → stored as fieldNameId
  */
 public class J2JSerializer {
 
     private final ObjectMapper mapper = new ObjectMapper();
 
-    /**
-     * Serializes the given @Persistent object to a JSONL string.
-     *
-     * @param obj must be an instance of a @Persistent class with exactly one @Id Long field
-     * @return one-line JSON string, e.g. {"type":"User","id":1,"name":"Anna","age":19,"active":true}
-     * @throws J2JSerializationException if class is not @Persistent, has no/multiple @Id fields,
-     *                                   or @Id field type is not Long
-     */
     public String serialize(Object obj) {
         if (obj == null) {
             throw new J2JSerializationException("Cannot serialize null");
@@ -66,7 +51,22 @@ public class J2JSerializer {
                 if (field.isAnnotationPresent(Id.class)) continue;
 
                 field.setAccessible(true);
-                putValue(node, field.getName(), field.get(obj));
+                Object value = field.get(obj);
+
+                if (field.isAnnotationPresent(Reference.class)) {
+
+                    String refKey = field.getName() + "Id";
+
+                    if (value == null) {
+                        node.putNull(refKey);
+                    } else {
+                        Long refId = extractId(value);
+                        node.put(refKey, refId);
+                    }
+
+                } else {
+                    putValue(node, field.getName(), value);
+                }
             }
 
             return mapper.writeValueAsString(node);
@@ -80,7 +80,6 @@ public class J2JSerializer {
         }
     }
 
-
     private Field resolveIdField(Class<?> clazz) {
         Field found = null;
 
@@ -92,12 +91,14 @@ public class J2JSerializer {
                         clazz.getSimpleName() + " has more than one @Id field"
                 );
             }
+
             if (!field.getType().equals(Long.class)) {
                 throw new J2JSerializationException(
                         "@Id field '" + field.getName() + "' in " + clazz.getSimpleName()
                                 + " must be Long, got: " + field.getType().getSimpleName()
                 );
             }
+
             found = field;
         }
 
@@ -106,19 +107,66 @@ public class J2JSerializer {
                     clazz.getSimpleName() + " has no @Id field — add a Long field annotated with @Id"
             );
         }
+
         return found;
     }
 
+    private ObjectNode serializeObject(Object obj) {
+        ObjectNode node = mapper.createObjectNode();
+        Class<?> clazz = obj.getClass();
+
+        node.put("type", clazz.getSimpleName());
+
+        for (Field field : clazz.getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class)) continue;
+
+            field.setAccessible(true);
+            try {
+                putValue(node, field.getName(), field.get(obj));
+            } catch (IllegalAccessException e) {
+                throw new J2JSerializationException("Failed to serialize nested object", e);
+            }
+        }
+
+        return node;
+    }
+
     private void putValue(ObjectNode node, String key, Object value) {
-        if      (value == null)              node.putNull(key);
-        else if (value instanceof String s)  node.put(key, s);
-        else if (value instanceof Integer i) node.put(key, i);
-        else if (value instanceof Long l)    node.put(key, l);
-        else if (value instanceof Double d)  node.put(key, d);
-        else if (value instanceof Float f)   node.put(key, f);
-        else if (value instanceof Boolean b) node.put(key, b);
-        else {
-            node.put(key, value.toString());
+        if (value == null) {
+            node.putNull(key);
+            return;
+        }
+
+        if (value instanceof String s) {
+            node.put(key, s);
+        } else if (value instanceof Integer i) {
+            node.put(key, i);
+        } else if (value instanceof Long l) {
+            node.put(key, l);
+        } else if (value instanceof Double d) {
+            node.put(key, d);
+        } else if (value instanceof Float f) {
+            node.put(key, f);
+        } else if (value instanceof Boolean b) {
+            node.put(key, b);
+        } else {
+            node.set(key, serializeObject(value));
         }
     }
+
+    private Long extractId(Object obj) {
+        for (Field field : obj.getClass().getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class)) {
+                field.setAccessible(true);
+                try {
+                    return (Long) field.get(obj);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        throw new RuntimeException("Referenced object has no @Id");
+    }
+
+
 }
