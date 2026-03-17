@@ -17,7 +17,6 @@ public class J2JDeserializer {
         this.manager = manager;
     }
 
-    // 🔹 создаём объект без reference
     public Object createShallow(JsonNode node) throws Exception {
         String type = node.get("type").asText();
         Class<?> clazz = Class.forName(basePackage + "." + type);
@@ -41,7 +40,6 @@ public class J2JDeserializer {
         return instance;
     }
 
-    // 🔥 подтягиваем ссылки по id
     public void resolveReferences(Object obj, JsonNode node) {
         Class<?> clazz = obj.getClass();
 

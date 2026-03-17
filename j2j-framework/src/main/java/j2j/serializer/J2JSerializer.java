@@ -38,7 +38,6 @@ public class J2JSerializer {
             ObjectNode node = mapper.createObjectNode();
             node.put("type", clazz.getSimpleName());
 
-            // 🔹 ID
             idField.setAccessible(true);
             Long idValue = (Long) idField.get(obj);
 
@@ -48,14 +47,12 @@ public class J2JSerializer {
                 node.put("id", idValue);
             }
 
-            // 🔥 ПОЛЯ
             for (Field field : clazz.getDeclaredFields()) {
                 if (field.isAnnotationPresent(Id.class)) continue;
 
                 field.setAccessible(true);
                 Object value = field.get(obj);
 
-                // ✅ ВОТ ГДЕ РАБОТАЕТ @Reference
                 if (field.isAnnotationPresent(Reference.class)) {
 
                     String refKey = field.getName() + "Id";
@@ -114,9 +111,6 @@ public class J2JSerializer {
         return found;
     }
 
-    /**
-     * 🔹 Рекурсивная сериализация вложенных объектов (embedded)
-     */
     private ObjectNode serializeObject(Object obj) {
         ObjectNode node = mapper.createObjectNode();
         Class<?> clazz = obj.getClass();
@@ -137,9 +131,6 @@ public class J2JSerializer {
         return node;
     }
 
-    /**
-     * 🔹 Примитивы + fallback на вложенный объект
-     */
     private void putValue(ObjectNode node, String key, Object value) {
         if (value == null) {
             node.putNull(key);
@@ -163,10 +154,7 @@ public class J2JSerializer {
             node.set(key, serializeObject(value));
         }
     }
-
-    /**
-     * 🔥 Вытаскиваем @Id у referenced объекта
-     */
+    
     private Long extractId(Object obj) {
         for (Field field : obj.getClass().getDeclaredFields()) {
             if (field.isAnnotationPresent(Id.class)) {
