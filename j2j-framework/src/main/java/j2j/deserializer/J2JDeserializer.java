@@ -22,13 +22,23 @@ public class J2JDeserializer {
         Class<?> clazz = Class.forName(basePackage + "." + type);
 
         Object instance = clazz.getDeclaredConstructor().newInstance();
+        
+        for (Field field : clazz.getDeclaredFields()) {
+            if (!field.isAnnotationPresent(j2j.annotation.Id.class)) continue;
+
+            field.setAccessible(true);
+            JsonNode idNode = node.get("id");
+            if (idNode != null && !idNode.isNull()) {
+                Long idValue = idNode.asLong();
+                field.set(instance, idValue);
+            }
+        }
 
         for (Field field : clazz.getDeclaredFields()) {
             field.setAccessible(true);
 
-            if (field.isAnnotationPresent(Reference.class)) {
-                continue;
-            }
+            if (field.isAnnotationPresent(j2j.annotation.Id.class)) continue;
+            if (field.isAnnotationPresent(Reference.class)) continue;
 
             JsonNode valueNode = node.get(field.getName());
             if (valueNode == null || valueNode.isNull()) continue;
@@ -54,7 +64,7 @@ public class J2JDeserializer {
 
                 if (refNode == null || refNode.isNull()) continue;
 
-                Long refId = refNode.longValue();
+                Long refId = refNode.isLong() ? refNode.longValue() : refNode.asLong();
                 Object refObj = manager.getById(refId);
 
                 field.set(obj, refObj);

@@ -150,11 +150,10 @@ public class J2JSerializer {
         } else if (value instanceof Boolean b) {
             node.put(key, b);
         } else {
-            // 🔁 вложенный объект
             node.set(key, serializeObject(value));
         }
     }
-    
+
     private Long extractId(Object obj) {
         for (Field field : obj.getClass().getDeclaredFields()) {
             if (field.isAnnotationPresent(Id.class)) {

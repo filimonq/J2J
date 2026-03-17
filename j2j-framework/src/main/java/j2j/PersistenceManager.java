@@ -159,21 +159,18 @@ public class PersistenceManager {
         ObjectMapper mapper = new ObjectMapper();
 
         try {
-            // читаем JSON
             for (String line : lines) {
                 if (!line.isBlank()) {
                     nodes.add(mapper.readTree(line));
                 }
             }
 
-            // 1. создаём объекты (без ссылок)
             for (JsonNode node : nodes) {
                 Object obj = deserializer.createShallow(node);
                 Long id = extractId(obj);
                 cache.put(id, obj);
             }
 
-            // 2. резолвим ссылки
             for (JsonNode node : nodes) {
                 Long id = node.get("id").longValue();
                 Object obj = cache.get(id);
