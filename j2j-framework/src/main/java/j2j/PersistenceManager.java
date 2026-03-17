@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import j2j.annotation.Id;
 import j2j.annotation.Persistent;
+import j2j.deserializer.J2JDeserializer;
 import j2j.id.CounterIdStrategy;
 import j2j.id.IdGenerationStrategy;
 import j2j.id.UuidIdStrategy;
@@ -14,7 +15,9 @@ import j2j.storage.FileStorage;
 import java.lang.reflect.Field;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Central facade of the J2J framework.
@@ -31,6 +34,8 @@ public class PersistenceManager {
     private final J2JSerializer serializer;
     private final FileStorage storage;
     private final IdGenerationStrategy idStrategy;
+    private final Map<Long, Object> cache = new HashMap<>();
+    private final J2JDeserializer deserializer;
 
     private final List<String> buffer = new ArrayList<>();
 
@@ -54,7 +59,7 @@ public class PersistenceManager {
     public PersistenceManager(String filePath, IdGenerationStrategy idStrategy) {
         this.storage = new FileStorage(Path.of(filePath));
         this.serializer = new J2JSerializer();
-
+        this.deserializer = new J2JDeserializer(this);
         if (idStrategy instanceof CounterIdStrategy) {
             this.idStrategy = new CounterIdStrategy(detectMaxId() + 1);
         } else {
@@ -148,4 +153,54 @@ public class PersistenceManager {
         return maxId;
     }
 
+    public void loadAll() {
+        List<String> lines = storage.readAllLines();
+        List<JsonNode> nodes = new ArrayList<>();
+        ObjectMapper mapper = new ObjectMapper();
+
+        try {
+            // читаем JSON
+            for (String line : lines) {
+                if (!line.isBlank()) {
+                    nodes.add(mapper.readTree(line));
+                }
+            }
+
+            // 1. создаём объекты (без ссылок)
+            for (JsonNode node : nodes) {
+                Object obj = deserializer.createShallow(node);
+                Long id = extractId(obj);
+                cache.put(id, obj);
+            }
+
+            // 2. резолвим ссылки
+            for (JsonNode node : nodes) {
+                Long id = node.get("id").longValue();
+                Object obj = cache.get(id);
+
+                deserializer.resolveReferences(obj, node);
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("loadAll failed", e);
+        }
+    }
+
+    public Object getById(Long id) {
+        return cache.get(id);
+    }
+
+    private Long extractId(Object obj) {
+        for (Field field : obj.getClass().getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class)) {
+                field.setAccessible(true);
+                try {
+                    return (Long) field.get(obj);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+        throw new RuntimeException("No @Id field in " + obj.getClass());
+    }
 }
