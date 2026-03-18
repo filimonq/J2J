@@ -70,4 +70,23 @@ public class FileStorage {
             throw new FileStorageException("Failed to read storage file: " + filePath, e);
         }
     }
+
+    /**
+     * Overwrites the storage file with the provided lines.
+     * Useful for compaction and cleanup.
+     * @param lines list of JSON strings to write
+     */
+    public void overwriteLines(List<String> lines) {
+        try (BufferedWriter writer = java.nio.file.Files.newBufferedWriter(
+                filePath,
+                java.nio.file.StandardOpenOption.CREATE,
+                java.nio.file.StandardOpenOption.TRUNCATE_EXISTING)) {
+            for (String line : lines) {
+                writer.write(line);
+                writer.newLine();
+            }
+        } catch (java.io.IOException e) {
+            throw new FileStorageException("Failed to overwrite storage file: " + filePath, e);
+        }
+    }
 }

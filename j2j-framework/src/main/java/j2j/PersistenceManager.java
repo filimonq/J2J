@@ -8,8 +8,8 @@ import j2j.deserializer.J2JDeserializer;
 import j2j.id.CounterIdStrategy;
 import j2j.id.IdGenerationStrategy;
 import j2j.id.UuidIdStrategy;
-import j2j.serializer.J2JSerializer;
 import j2j.serializer.J2JSerializationException;
+import j2j.serializer.J2JSerializer;
 import j2j.storage.FileStorage;
 
 import java.lang.reflect.Field;
@@ -18,43 +18,42 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.Set;
+import java.util.HashSet;
 
 /**
  * Central facade of the J2J framework.
- * Workflow:
- *   save(obj)  → assigns ID if null → serializes → puts into buffer
- *   flush()    → writes entire buffer to file via FileStorage
- * Example:
- *   PersistenceManager manager = new PersistenceManager("storage.json");
- *   manager.save(user);
- *   manager.flush();
+ * Implements Unit of Work and Identity Map patterns for persistent objects.
+ * * Key concepts:
+ * 1. Identity Map: Ensures only one instance of an object exists in memory per ID.
+ * 2. Dirty Tracking: Tracks modified objects and saves only changed data.
+ * 3. Append-only Logging: Writes updates as new lines to the end of the file for performance.
  */
 public class PersistenceManager {
 
     private final J2JSerializer serializer;
     private final FileStorage storage;
     private final IdGenerationStrategy idStrategy;
-    private final Map<Long, Object> cache = new HashMap<>();
     private final J2JDeserializer deserializer;
 
-    private final List<String> buffer = new ArrayList<>();
+    private final ObjectMapper mapper = new ObjectMapper();
 
     /**
-     * Creates a PersistenceManager with UuidIdStrategy.
-     *
-     * @param filePath path to the JSONL storage file
+     * Cache of loaded/saved objects to maintain referential integrity.
      */
-    public PersistenceManager(String filePath) {
-        this(filePath, new UuidIdStrategy());
-    }
+    private final Map<Long, Object> cache = new HashMap<>();
 
     /**
-     * Creates a PersistenceManager with a custom ID generation strategy.
-     * If CounterIdStrategy is passed — automatically detects max existing ID
-     * in the file and starts the counter from maxId + 1.
-     *
-     * @param filePath   path to the JSONL storage file
-     * @param idStrategy strategy to use for ID generation
+     * Set of IDs for objects modified since the last flush.
+     */
+    private final Set<Long> dirtyIds = new HashSet<>();
+
+    /**
+     * Initializes manager with a ID strategy.
+     * Auto-detects the starting index if CounterIdStrategy is used.
+     * @param filePath path to the storage file
+     * @param idStrategy strategy for generating unique IDs
      */
     public PersistenceManager(String filePath, IdGenerationStrategy idStrategy) {
         this.storage = new FileStorage(Path.of(filePath));
@@ -68,36 +67,25 @@ public class PersistenceManager {
     }
 
     /**
-     * Prepares an object for persistence:
-     *   1. Validates @Persistent annotation
-     *   2. Assigns an ID if the @Id field is null
-     *   3. Serializes to JSON and puts into the buffer
-     * Changes are NOT written to file until flush() is called.
-     *
-     * @param obj object to save; must be @Persistent with an @Id Long field
-     * @throws J2JSerializationException if the object is invalid
+     * Marks an object for persistence.
+     * Generates a new ID if it's missing, puts the object in cache,
+     * and flags it as "dirty" for the next flush.
+     * @param obj object to save (must be annotated with @Persistent)
      */
     public void save(Object obj) {
         if (obj == null) {
             throw new IllegalArgumentException("Cannot save null object");
         }
-
         validatePersistent(obj.getClass());
-        assignIdIfAbsent(obj);
 
-        String json = serializer.serialize(obj);
-        buffer.add(json);
-    }
+        Long id = extractIdSafely(obj);
+        if (id == null) {
+            id = idStrategy.generateId();
+            setId(obj, id);
+        }
 
-    /**
-     * Writes all buffered objects to the storage file and clears the buffer.
-     * Does nothing if the buffer is empty.
-     */
-    public void flush() {
-        if (buffer.isEmpty()) return;
-
-        storage.appendLines(new ArrayList<>(buffer));
-        buffer.clear();
+        cache.put(id, obj);
+        dirtyIds.add(id);
     }
 
     private void validatePersistent(Class<?> clazz) {
@@ -108,35 +96,135 @@ public class PersistenceManager {
         }
     }
 
-    private void assignIdIfAbsent(Object obj) {
-        Class<?> clazz = obj.getClass();
-
-        for (Field field : clazz.getDeclaredFields()) {
-            if (!field.isAnnotationPresent(Id.class)) continue;
-
-            try {
+    private Long extractIdSafely(Object obj) {
+        for (Field field : obj.getClass().getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class)) {
                 field.setAccessible(true);
-                if (field.get(obj) == null) {
-                    field.set(obj, idStrategy.generateId());
+                try {
+                    return (Long) field.get(obj);
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to access @Id field", e);
                 }
-            } catch (IllegalAccessException e) {
-                throw new J2JSerializationException(
-                        "Failed to assign ID to " + clazz.getSimpleName(), e
-                );
             }
-            return;
+        }
+        return null;
+    }
+
+    /**
+     * Synchronizes all dirty objects with the file storage.
+     * Uses append-only logic by writing updated states to the end of the file.
+     */
+    public void flush() {
+        if (dirtyIds.isEmpty()) return;
+
+        List<String> linesToWrite = new ArrayList<>();
+        for (Long id : dirtyIds) {
+            Object obj = cache.get(id);
+            if (obj != null) {
+                String json = serializer.serialize(obj);
+                linesToWrite.add(json);
+            }
+        }
+
+        storage.appendLines(linesToWrite);
+        dirtyIds.clear();
+    }
+
+    /**
+     * Loads all data from storage into memory.
+     * Implements deduplication: only the most recent version of an ID is kept.
+     * Performs two-pass loading to resolve references between objects.
+     */
+    public void loadAll() {
+        List<String> lines = storage.readAllLines();
+        if (lines.isEmpty()) return;
+
+        Map<Long, JsonNode> latestNodes = new HashMap<>();
+
+        try {
+            for (String line : lines) {
+                if (!line.isBlank()) {
+                    JsonNode node = mapper.readTree(line);
+                    JsonNode idNode = node.get("id");
+                    if (idNode != null && !idNode.isNull()) {
+                        latestNodes.put(idNode.asLong(), node);
+                    }
+                }
+            }
+
+            for (JsonNode node : latestNodes.values()) {
+                Object obj = deserializer.createShallow(node);
+                Long id = node.get("id").asLong();
+                cache.put(id, obj);
+            }
+
+            for (JsonNode node : latestNodes.values()) {
+                Long id = node.get("id").asLong();
+                Object obj = cache.get(id);
+                deserializer.resolveReferences(obj, node);
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("loadAll failed", e);
         }
     }
 
     /**
-     * Reads the storage file and finds the maximum "id" value across all lines.
-     * Returns 0 if the file is empty or doesn't exist.
+     * Removes old object versions from the file.
+     * Leaves only the most recent entry for each ID.
      */
+    public void compact() {
+        List<String> lines = storage.readAllLines();
+        if (lines.isEmpty()) return;
+
+        Map<Long, String> latestLines = new LinkedHashMap<>();
+
+        try {
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+
+                JsonNode node = mapper.readTree(line);
+                JsonNode idNode = node.get("id");
+
+                if (idNode != null && !idNode.isNull()) {
+                    latestLines.put(idNode.asLong(), line);
+                }
+            }
+
+            storage.overwriteLines(new ArrayList<>(latestLines.values()));
+
+        } catch (Exception e) {
+            throw new RuntimeException("Compaction failed", e);
+        }
+    }
+
+    /**
+     * Retrieves an object from the internal cache by its ID.
+     * @param id the unique identifier
+     * @return the cached object or null if not found
+     */
+    public Object getById(Long id) {
+        return cache.get(id);
+    }
+
+    private void setId(Object obj, Long id) {
+        for (Field field : obj.getClass().getDeclaredFields()) {
+            if (field.isAnnotationPresent(Id.class)) {
+                field.setAccessible(true);
+                try {
+                    field.set(obj, id);
+                    return;
+                } catch (IllegalAccessException e) {
+                    throw new RuntimeException("Failed to assign ID to " + obj.getClass().getSimpleName(), e);
+                }
+            }
+        }
+    }
+
     private long detectMaxId() {
         List<String> lines = storage.readAllLines();
         if (lines.isEmpty()) return 0L;
 
-        ObjectMapper mapper = new ObjectMapper();
         long maxId = 0L;
 
         for (String line : lines) {
@@ -146,58 +234,8 @@ public class PersistenceManager {
                 if (idNode != null && idNode.isNumber()) {
                     maxId = Math.max(maxId, idNode.longValue());
                 }
-            } catch (Exception ignored) {
-            }
+            } catch (Exception ignored) {}
         }
-
         return maxId;
-    }
-
-    public void loadAll() {
-        List<String> lines = storage.readAllLines();
-        List<JsonNode> nodes = new ArrayList<>();
-        ObjectMapper mapper = new ObjectMapper();
-
-        try {
-            for (String line : lines) {
-                if (!line.isBlank()) {
-                    nodes.add(mapper.readTree(line));
-                }
-            }
-
-            for (JsonNode node : nodes) {
-                Object obj = deserializer.createShallow(node);
-                Long id = extractId(obj);
-                cache.put(id, obj);
-            }
-
-            for (JsonNode node : nodes) {
-                Long id = node.get("id").longValue();
-                Object obj = cache.get(id);
-
-                deserializer.resolveReferences(obj, node);
-            }
-
-        } catch (Exception e) {
-            throw new RuntimeException("loadAll failed", e);
-        }
-    }
-
-    public Object getById(Long id) {
-        return cache.get(id);
-    }
-
-    private Long extractId(Object obj) {
-        for (Field field : obj.getClass().getDeclaredFields()) {
-            if (field.isAnnotationPresent(Id.class)) {
-                field.setAccessible(true);
-                try {
-                    return (Long) field.get(obj);
-                } catch (IllegalAccessException e) {
-                    throw new RuntimeException(e);
-                }
-            }
-        }
-        throw new RuntimeException("No @Id field in " + obj.getClass());
     }
 }

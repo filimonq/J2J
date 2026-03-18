@@ -30,5 +30,21 @@ public class Main {
         User newU2 = (User) manager.getById(4L);
         System.out.println(newU1.getName().name + newU1.getName().surname);
         System.out.println(newU2.getName().name + newU2.getName().surname);
+
+        // Identity Map и Update
+        u1.setAge(21);
+        manager.save(u1);
+        manager.flush();
+        manager.compact();
+
+        System.out.println("Identity Check: " + (u1 == manager.getById(3L)));
+
+        PersistenceManager manager2 =
+                new PersistenceManager("storage.json", new CounterIdStrategy());
+        manager2.loadAll();
+
+        User loadedUser = (User) manager2.getById(3L);
+        System.out.println("Loaded Age: " + loadedUser.getAge());
+        System.out.println("Update Logic Success: " + (loadedUser.getAge() == 21));
     }
 }
