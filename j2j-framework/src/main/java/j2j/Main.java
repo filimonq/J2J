@@ -35,6 +35,7 @@ public class Main {
         u1.setAge(21);
         manager.save(u1);
         manager.flush();
+        manager.compact();
 
         System.out.println("Identity Check: " + (u1 == manager.getById(3L)));
 

@@ -18,14 +18,17 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
 import java.util.Set;
 import java.util.HashSet;
 
 /**
  * Central facade of the J2J framework.
- * Workflow:
- * save(obj)  → assigns ID if null → updates cache → marks ID as dirty
- * flush()    → serializes only dirty objects → appends to file via FileStorage
+ * Implements Unit of Work and Identity Map patterns for persistent objects.
+ * * Key concepts:
+ * 1. Identity Map: Ensures only one instance of an object exists in memory per ID.
+ * 2. Dirty Tracking: Tracks modified objects and saves only changed data.
+ * 3. Append-only Logging: Writes updates as new lines to the end of the file for performance.
  */
 public class PersistenceManager {
 
@@ -34,14 +37,24 @@ public class PersistenceManager {
     private final IdGenerationStrategy idStrategy;
     private final J2JDeserializer deserializer;
 
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    /**
+     * Cache of loaded/saved objects to maintain referential integrity.
+     */
     private final Map<Long, Object> cache = new HashMap<>();
 
+    /**
+     * Set of IDs for objects modified since the last flush.
+     */
     private final Set<Long> dirtyIds = new HashSet<>();
 
-    public PersistenceManager(String filePath) {
-        this(filePath, new UuidIdStrategy());
-    }
-
+    /**
+     * Initializes manager with a ID strategy.
+     * Auto-detects the starting index if CounterIdStrategy is used.
+     * @param filePath path to the storage file
+     * @param idStrategy strategy for generating unique IDs
+     */
     public PersistenceManager(String filePath, IdGenerationStrategy idStrategy) {
         this.storage = new FileStorage(Path.of(filePath));
         this.serializer = new J2JSerializer();
@@ -53,6 +66,12 @@ public class PersistenceManager {
         }
     }
 
+    /**
+     * Marks an object for persistence.
+     * Generates a new ID if it's missing, puts the object in cache,
+     * and flags it as "dirty" for the next flush.
+     * @param obj object to save (must be annotated with @Persistent)
+     */
     public void save(Object obj) {
         if (obj == null) {
             throw new IllegalArgumentException("Cannot save null object");
@@ -91,6 +110,10 @@ public class PersistenceManager {
         return null;
     }
 
+    /**
+     * Synchronizes all dirty objects with the file storage.
+     * Uses append-only logic by writing updated states to the end of the file.
+     */
     public void flush() {
         if (dirtyIds.isEmpty()) return;
 
@@ -107,11 +130,14 @@ public class PersistenceManager {
         dirtyIds.clear();
     }
 
+    /**
+     * Loads all data from storage into memory.
+     * Implements deduplication: only the most recent version of an ID is kept.
+     * Performs two-pass loading to resolve references between objects.
+     */
     public void loadAll() {
         List<String> lines = storage.readAllLines();
         if (lines.isEmpty()) return;
-
-        ObjectMapper mapper = new ObjectMapper();
 
         Map<Long, JsonNode> latestNodes = new HashMap<>();
 
@@ -143,6 +169,40 @@ public class PersistenceManager {
         }
     }
 
+    /**
+     * Removes old object versions from the file.
+     * Leaves only the most recent entry for each ID.
+     */
+    public void compact() {
+        List<String> lines = storage.readAllLines();
+        if (lines.isEmpty()) return;
+
+        Map<Long, String> latestLines = new LinkedHashMap<>();
+
+        try {
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+
+                JsonNode node = mapper.readTree(line);
+                JsonNode idNode = node.get("id");
+
+                if (idNode != null && !idNode.isNull()) {
+                    latestLines.put(idNode.asLong(), line);
+                }
+            }
+
+            storage.overwriteLines(new ArrayList<>(latestLines.values()));
+
+        } catch (Exception e) {
+            throw new RuntimeException("Compaction failed", e);
+        }
+    }
+
+    /**
+     * Retrieves an object from the internal cache by its ID.
+     * @param id the unique identifier
+     * @return the cached object or null if not found
+     */
     public Object getById(Long id) {
         return cache.get(id);
     }
@@ -165,7 +225,6 @@ public class PersistenceManager {
         List<String> lines = storage.readAllLines();
         if (lines.isEmpty()) return 0L;
 
-        ObjectMapper mapper = new ObjectMapper();
         long maxId = 0L;
 
         for (String line : lines) {
