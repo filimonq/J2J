@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import j2j.annotation.Id;
 import j2j.annotation.Persistent;
+import j2j.annotation.Reference;
 import j2j.deserializer.J2JDeserializer;
 import j2j.filter.JsonFilter;
 import j2j.id.CounterIdStrategy;
@@ -241,40 +242,42 @@ public class PersistenceManager {
     }
 
     public List<Object> loadWithFilter(JsonFilter filter) {
-        List<String> lines = storage.readAllLines();
-        ObjectMapper mapper = new ObjectMapper();
 
-        List<JsonNode> allNodes = new ArrayList<>();
         List<JsonNode> filteredNodes = new ArrayList<>();
 
-        try {
-            // 🔹 читаем ВСЕ
-            for (String line : lines) {
-                if (line.isBlank()) continue;
+        try (var lines = storage.streamLines()) {
 
-                JsonNode node = mapper.readTree(line);
-                allNodes.add(node);
+            lines.forEach(line -> {
+                if (line.isBlank()) return;
 
-                if (filter.matches(node)) {
-                    filteredNodes.add(node);
+                try {
+                    JsonNode node = mapper.readTree(line);
+
+                    if (filter.matches(node)) {
+                        filteredNodes.add(node);
+                    }
+
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
                 }
-            }
+            });
 
-            // 🔥 1. создаём ВСЕ объекты (чтобы были в cache)
-            for (JsonNode node : allNodes) {
+            for (JsonNode node : filteredNodes) {
                 Object obj = deserializer.createShallow(node);
                 Long id = extractIdSafely(obj);
                 cache.put(id, obj);
             }
 
-            // 🔥 2. резолвим ссылки для ВСЕХ
-            for (JsonNode node : allNodes) {
+            for (JsonNode node : filteredNodes) {
+                resolveDependencies(node);
+            }
+
+            for (JsonNode node : filteredNodes) {
                 Long id = node.get("id").asLong();
                 Object obj = cache.get(id);
                 deserializer.resolveReferences(obj, node);
             }
 
-            // 🔥 3. возвращаем только отфильтрованные
             List<Object> result = new ArrayList<>();
 
             for (JsonNode node : filteredNodes) {
@@ -288,5 +291,70 @@ public class PersistenceManager {
             throw new RuntimeException(e);
         }
     }
+    private void resolveDependencies(JsonNode node) {
+        for (Field field : getClassFields(node)) {
+            if (!field.isAnnotationPresent(Reference.class)) continue;
 
+            field.setAccessible(true);
+
+            String refKey = field.getName() + "Id";
+            JsonNode refNode = node.get(refKey);
+
+            if (refNode == null || refNode.isNull()) continue;
+
+            Long refId = refNode.asLong();
+
+            if (this.getById(refId) == null) {
+                JsonNode refJson = findNodeById(refId);
+
+                try {
+                    Object refObj = deserializer.createShallow(refJson);
+                    cache.put(refId, refObj);
+
+                    resolveDependencies(refJson);
+                    deserializer.resolveReferences(refObj, refJson); // 🔥 важно
+
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+    }
+    private Field[] getClassFields(JsonNode node) {
+        try {
+            String type = node.get("type").asText();
+            Class<?> clazz = Class.forName("j2j.model." + type);
+            return clazz.getDeclaredFields();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get class fields", e);
+        }
+    }
+    private JsonNode findNodeById(Long id) {
+        List<String> lines = storage.readAllLines();
+
+        JsonNode result = null;
+
+        try {
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+
+                JsonNode node = mapper.readTree(line);
+                JsonNode idNode = node.get("id");
+
+                if (idNode != null && !idNode.isNull()) {
+                    if (idNode.asLong() == id) {
+                        result = node; // берём последнюю версию
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("findNodeById failed", e);
+        }
+
+        if (result == null) {
+            throw new RuntimeException("Object with id=" + id + " not found");
+        }
+
+        return result;
+    }
 }

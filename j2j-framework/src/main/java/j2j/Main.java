@@ -52,7 +52,6 @@ public class Main {
         System.out.println("Loaded Age: " + loadedUser.getAge());
         System.out.println("Update Logic Success: " + (loadedUser.getAge() == 21));
 
-        // 🔥 ФИЛЬТРАЦИЯ
         System.out.println("\n--- FILTER TEST ---");
 
         PersistenceManager manager3 =
