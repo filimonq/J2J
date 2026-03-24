@@ -1,9 +1,14 @@
 package j2j;
 
 import j2j.deserializer.J2JDeserializer;
+import j2j.filter.AndFilter;
+import j2j.filter.FieldEqualsFilter;
+import j2j.filter.JsonFilter;
 import j2j.id.CounterIdStrategy;
 import j2j.model.Fullname;
 import j2j.model.User;
+
+import java.util.List;
 
 public class Main {
 
@@ -46,5 +51,27 @@ public class Main {
         User loadedUser = (User) manager2.getById(3L);
         System.out.println("Loaded Age: " + loadedUser.getAge());
         System.out.println("Update Logic Success: " + (loadedUser.getAge() == 21));
+
+        // 🔥 ФИЛЬТРАЦИЯ
+        System.out.println("\n--- FILTER TEST ---");
+
+        PersistenceManager manager3 =
+                new PersistenceManager("storage.json", new CounterIdStrategy());
+
+        JsonFilter filter = new AndFilter(
+                new FieldEqualsFilter("type", "User"),
+                new FieldEqualsFilter("active", "true")
+        );
+
+        List<Object> filtered = manager3.loadWithFilter(filter);
+
+        for (Object obj : filtered) {
+            User u = (User) obj;
+            System.out.println(
+                    "User: " + u.getName().name +
+                            " age=" + u.getAge() +
+                            " active=" + u.isActive()
+            );
+        }
     }
 }

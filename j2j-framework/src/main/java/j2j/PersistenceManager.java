@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import j2j.annotation.Id;
 import j2j.annotation.Persistent;
 import j2j.deserializer.J2JDeserializer;
+import j2j.filter.JsonFilter;
 import j2j.id.CounterIdStrategy;
 import j2j.id.IdGenerationStrategy;
 import j2j.id.UuidIdStrategy;
@@ -238,4 +239,54 @@ public class PersistenceManager {
         }
         return maxId;
     }
+
+    public List<Object> loadWithFilter(JsonFilter filter) {
+        List<String> lines = storage.readAllLines();
+        ObjectMapper mapper = new ObjectMapper();
+
+        List<JsonNode> allNodes = new ArrayList<>();
+        List<JsonNode> filteredNodes = new ArrayList<>();
+
+        try {
+            // 🔹 читаем ВСЕ
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+
+                JsonNode node = mapper.readTree(line);
+                allNodes.add(node);
+
+                if (filter.matches(node)) {
+                    filteredNodes.add(node);
+                }
+            }
+
+            // 🔥 1. создаём ВСЕ объекты (чтобы были в cache)
+            for (JsonNode node : allNodes) {
+                Object obj = deserializer.createShallow(node);
+                Long id = extractIdSafely(obj);
+                cache.put(id, obj);
+            }
+
+            // 🔥 2. резолвим ссылки для ВСЕХ
+            for (JsonNode node : allNodes) {
+                Long id = node.get("id").asLong();
+                Object obj = cache.get(id);
+                deserializer.resolveReferences(obj, node);
+            }
+
+            // 🔥 3. возвращаем только отфильтрованные
+            List<Object> result = new ArrayList<>();
+
+            for (JsonNode node : filteredNodes) {
+                Long id = node.get("id").asLong();
+                result.add(cache.get(id));
+            }
+
+            return result;
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 }
