@@ -312,7 +312,7 @@ public class PersistenceManager {
                     cache.put(refId, refObj);
 
                     resolveDependencies(refJson);
-                    deserializer.resolveReferences(refObj, refJson); // 🔥 важно
+                    deserializer.resolveReferences(refObj, refJson);
 
                 } catch (Exception e) {
                     throw new RuntimeException(e);
@@ -343,7 +343,7 @@ public class PersistenceManager {
 
                 if (idNode != null && !idNode.isNull()) {
                     if (idNode.asLong() == id) {
-                        result = node; // берём последнюю версию
+                        result = node;
                     }
                 }
             }
