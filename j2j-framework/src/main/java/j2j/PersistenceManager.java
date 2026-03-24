@@ -242,84 +242,72 @@ public class PersistenceManager {
     }
 
     public List<Object> loadWithFilter(JsonFilter filter) {
-
+        Map<Long, JsonNode> allNodes = new HashMap<>();
         List<JsonNode> filteredNodes = new ArrayList<>();
 
         try (var lines = storage.streamLines()) {
-
-            lines.forEach(line -> {
-                if (line.isBlank()) return;
-
+            lines.filter(line -> !line.isBlank()).forEach(line -> {
                 try {
                     JsonNode node = mapper.readTree(line);
-
+                    allNodes.put(node.get("id").asLong(), node);
                     if (filter.matches(node)) {
                         filteredNodes.add(node);
                     }
-
                 } catch (Exception e) {
-                    throw new RuntimeException(e);
+                    throw new RuntimeException("JSON error", e);
                 }
             });
 
             for (JsonNode node : filteredNodes) {
                 Object obj = deserializer.createShallow(node);
-                Long id = extractIdSafely(obj);
-                cache.put(id, obj);
+                cache.put(node.get("id").asLong(), obj);
             }
 
             for (JsonNode node : filteredNodes) {
-                resolveDependencies(node);
+                resolveDependencies(node, allNodes);
             }
 
+            List<Object> result = new ArrayList<>();
             for (JsonNode node : filteredNodes) {
                 Long id = node.get("id").asLong();
                 Object obj = cache.get(id);
                 deserializer.resolveReferences(obj, node);
+                result.add(obj);
             }
-
-            List<Object> result = new ArrayList<>();
-
-            for (JsonNode node : filteredNodes) {
-                Long id = node.get("id").asLong();
-                result.add(cache.get(id));
-            }
-
             return result;
 
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new RuntimeException("Filter loading failed", e);
         }
     }
-    private void resolveDependencies(JsonNode node) {
-        for (Field field : getClassFields(node)) {
-            if (!field.isAnnotationPresent(Reference.class)) continue;
 
-            field.setAccessible(true);
+    private void resolveDependencies(JsonNode node, Map<Long, JsonNode> allNodes) {
+        try {
+            for (Field field : getClassFields(node)) {
+                if (!field.isAnnotationPresent(Reference.class)) continue;
 
-            String refKey = field.getName() + "Id";
-            JsonNode refNode = node.get(refKey);
+                String refKey = field.getName() + "Id";
+                JsonNode refNode = node.get(refKey);
+                if (refNode == null || refNode.isNull()) continue;
 
-            if (refNode == null || refNode.isNull()) continue;
+                Long refId = refNode.asLong();
 
-            Long refId = refNode.asLong();
+                if (this.getById(refId) == null) {
+                    JsonNode refJson = allNodes.get(refId);
+                    if (refJson == null) throw new RuntimeException("Ref " + refId + " not found in file");
 
-            if (this.getById(refId) == null) {
-                JsonNode refJson = findNodeById(refId);
-
-                try {
                     Object refObj = deserializer.createShallow(refJson);
                     cache.put(refId, refObj);
 
-                    resolveDependencies(refJson);
+                    resolveDependencies(refJson, allNodes); // Рекурсия по памяти
                     deserializer.resolveReferences(refObj, refJson);
-
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
                 }
             }
+        } catch (Exception e) {
+            throw new RuntimeException("Dependency resolution failed", e);
         }
     }
+
     private Field[] getClassFields(JsonNode node) {
         try {
             String type = node.get("type").asText();
@@ -328,33 +316,5 @@ public class PersistenceManager {
         } catch (Exception e) {
             throw new RuntimeException("Failed to get class fields", e);
         }
-    }
-    private JsonNode findNodeById(Long id) {
-        List<String> lines = storage.readAllLines();
-
-        JsonNode result = null;
-
-        try {
-            for (String line : lines) {
-                if (line.isBlank()) continue;
-
-                JsonNode node = mapper.readTree(line);
-                JsonNode idNode = node.get("id");
-
-                if (idNode != null && !idNode.isNull()) {
-                    if (idNode.asLong() == id) {
-                        result = node;
-                    }
-                }
-            }
-        } catch (Exception e) {
-            throw new RuntimeException("findNodeById failed", e);
-        }
-
-        if (result == null) {
-            throw new RuntimeException("Object with id=" + id + " not found");
-        }
-
-        return result;
     }
 }
