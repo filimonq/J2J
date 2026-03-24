@@ -133,45 +133,6 @@ public class PersistenceManager {
     }
 
     /**
-     * Loads all data from storage into memory.
-     * Implements deduplication: only the most recent version of an ID is kept.
-     * Performs two-pass loading to resolve references between objects.
-     */
-    public void loadAll() {
-        List<String> lines = storage.readAllLines();
-        if (lines.isEmpty()) return;
-
-        Map<Long, JsonNode> latestNodes = new HashMap<>();
-
-        try {
-            for (String line : lines) {
-                if (!line.isBlank()) {
-                    JsonNode node = mapper.readTree(line);
-                    JsonNode idNode = node.get("id");
-                    if (idNode != null && !idNode.isNull()) {
-                        latestNodes.put(idNode.asLong(), node);
-                    }
-                }
-            }
-
-            for (JsonNode node : latestNodes.values()) {
-                Object obj = deserializer.createShallow(node);
-                Long id = node.get("id").asLong();
-                cache.put(id, obj);
-            }
-
-            for (JsonNode node : latestNodes.values()) {
-                Long id = node.get("id").asLong();
-                Object obj = cache.get(id);
-                deserializer.resolveReferences(obj, node);
-            }
-
-        } catch (Exception e) {
-            throw new RuntimeException("loadAll failed", e);
-        }
-    }
-
-    /**
      * Removes old object versions from the file.
      * Leaves only the most recent entry for each ID.
      */

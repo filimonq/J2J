@@ -1,76 +1,59 @@
 package j2j;
 
-import j2j.deserializer.J2JDeserializer;
-import j2j.filter.AndFilter;
-import j2j.filter.FieldEqualsFilter;
-import j2j.filter.JsonFilter;
+import j2j.filter.*;
 import j2j.id.CounterIdStrategy;
 import j2j.model.Fullname;
 import j2j.model.User;
-
 import java.util.List;
 
 public class Main {
-
     public static void main(String[] args) {
-        PersistenceManager manager =
-                new PersistenceManager("storage.json", new CounterIdStrategy());
+        PersistenceManager manager = new PersistenceManager("storage.json", new CounterIdStrategy());
 
-        Fullname f1 = new Fullname("Anna", "Ivanova");
-        Fullname f2 = new Fullname("Ben", "Johnson");
+        System.out.println("=== SHIFT 1: SAVING DATA ===");
+        Fullname fn1 = new Fullname("Ivan", "Ivanov");
+        User u1 = new User(fn1, 20, true);
 
-        manager.save(f1);
-        manager.save(f2);
+        Fullname fn2 = new Fullname("Petr", "Petrov");
+        User u2 = new User(fn2, 30, false);
 
-        User u1 = new User(f1, 19, true);
-        User u2 = new User(f2, 25, false);
-
+        manager.save(fn1);
         manager.save(u1);
+        manager.save(fn2);
         manager.save(u2);
+
+        System.out.println("Flushing to disk...");
         manager.flush();
 
+        System.out.println("\n=== SHIFT 2: IDENTITY MAP CHECK ===");
+        User cachedUser = (User) manager.getById(2L);
+        System.out.println("Same object in memory: " + (u1 == cachedUser));
 
-        manager.loadAll();
-        User newU1 = (User) manager.getById(3L);
-        User newU2 = (User) manager.getById(4L);
-        System.out.println(newU1.getName().name + newU1.getName().surname);
-        System.out.println(newU2.getName().name + newU2.getName().surname);
-
-        // Identity Map и Update
+        System.out.println("\n=== SHIFT 3: UPDATE & COMPACT ===");
+        System.out.println("Updating Ivan's age to 21...");
         u1.setAge(21);
         manager.save(u1);
         manager.flush();
+
+        System.out.println("Running compaction (cleaning old versions)...");
         manager.compact();
 
-        System.out.println("Identity Check: " + (u1 == manager.getById(3L)));
+        System.out.println("\n=== SHIFT 4: OPTIMIZED FILTER TEST ===");
+        PersistenceManager filterManager = new PersistenceManager("storage.json", new CounterIdStrategy());
 
-        PersistenceManager manager2 =
-                new PersistenceManager("storage.json", new CounterIdStrategy());
-        manager2.loadAll();
-
-        User loadedUser = (User) manager2.getById(3L);
-        System.out.println("Loaded Age: " + loadedUser.getAge());
-        System.out.println("Update Logic Success: " + (loadedUser.getAge() == 21));
-
-        System.out.println("\n--- FILTER TEST ---");
-
-        PersistenceManager manager3 =
-                new PersistenceManager("storage.json", new CounterIdStrategy());
-
-        JsonFilter filter = new AndFilter(
+        JsonFilter myFilter = new AndFilter(
                 new FieldEqualsFilter("type", "User"),
                 new FieldEqualsFilter("active", "true")
         );
 
-        List<Object> filtered = manager3.loadWithFilter(filter);
+        System.out.println("Loading active users with optimized filter...");
+        List<Object> activeUsers = filterManager.loadWithFilter(myFilter);
 
-        for (Object obj : filtered) {
+        for (Object obj : activeUsers) {
             User u = (User) obj;
-            System.out.println(
-                    "User: " + u.getName().name +
-                            " age=" + u.getAge() +
-                            " active=" + u.isActive()
-            );
+            System.out.println("Found Active User: " + u.getName().name + " " + u.getName().surname + ", age: " + u.getAge());
         }
+
+        System.out.println("\n=== DEMO FINISHED SUCCESSFULLY ===");
     }
 }
