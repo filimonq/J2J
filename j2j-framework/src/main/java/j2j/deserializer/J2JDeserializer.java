@@ -17,34 +17,53 @@ public class J2JDeserializer {
         this.manager = manager;
     }
 
-    public Object createShallow(JsonNode node) throws Exception {
-        String type = node.get("type").asText();
-        Class<?> clazz = Class.forName(basePackage + "." + type);
-
-        Object instance = clazz.getDeclaredConstructor().newInstance();
-        
-        for (Field field : clazz.getDeclaredFields()) {
-            if (!field.isAnnotationPresent(j2j.annotation.Id.class)) continue;
-
-            field.setAccessible(true);
-            JsonNode idNode = node.get("id");
-            if (idNode != null && !idNode.isNull()) {
-                Long idValue = idNode.asLong();
-                field.set(instance, idValue);
-            }
+    public Object createShallow(JsonNode node) {
+        JsonNode typeNode = node.get("type");
+        if (typeNode == null || typeNode.isNull()) {
+            throw new J2JDeserializationException("Cannot deserialize JSON: missing 'type' field");
         }
 
-        for (Field field : clazz.getDeclaredFields()) {
-            field.setAccessible(true);
+        String type = typeNode.asText();
+        Class<?> clazz;
+        Object instance;
 
-            if (field.isAnnotationPresent(j2j.annotation.Id.class)) continue;
-            if (field.isAnnotationPresent(Reference.class)) continue;
+        try {
+            clazz = Class.forName(basePackage + "." + type);
+            instance = clazz.getDeclaredConstructor().newInstance();
+        } catch (Exception e) {
+            throw new J2JDeserializationException(
+                    "Failed to instantiate class '" + type + "'. Ensure it has an empty constructor.", e
+            );
+        }
 
-            JsonNode valueNode = node.get(field.getName());
-            if (valueNode == null || valueNode.isNull()) continue;
+        try {
+            for (Field field : clazz.getDeclaredFields()) {
+                if (!field.isAnnotationPresent(j2j.annotation.Id.class)) continue;
 
-            Object value = deserializeValue(field.getType(), valueNode);
-            field.set(instance, value);
+                field.setAccessible(true);
+                JsonNode idNode = node.get("id");
+                if (idNode != null && !idNode.isNull()) {
+                    Long idValue = idNode.asLong();
+                    field.set(instance, idValue);
+                }
+            }
+
+            for (Field field : clazz.getDeclaredFields()) {
+                field.setAccessible(true);
+
+                if (field.isAnnotationPresent(j2j.annotation.Id.class)) continue;
+                if (field.isAnnotationPresent(Reference.class)) continue;
+
+                JsonNode valueNode = node.get(field.getName());
+                if (valueNode == null || valueNode.isNull()) continue;
+
+                Object value = deserializeValue(field.getType(), valueNode);
+                field.set(instance, value);
+            }
+        } catch (Exception e) {
+            throw new J2JDeserializationException(
+                    "Error mapping fields for object of type '" + type + "'", e
+            );
         }
 
         return instance;
@@ -70,15 +89,14 @@ public class J2JDeserializer {
                 field.set(obj, refObj);
 
             } catch (Exception e) {
-                throw new RuntimeException(
-                        "Failed to resolve reference: " + field.getName(), e
+                throw new J2JDeserializationException(
+                        "Failed to resolve @Reference '" + field.getName() + "' in class " + clazz.getSimpleName(), e
                 );
             }
         }
     }
 
-    private Object deserializeValue(Class<?> fieldType, JsonNode node) throws Exception {
-
+    private Object deserializeValue(Class<?> fieldType, JsonNode node) {
         if (node.isTextual()) return node.asText();
         if (node.isInt()) return node.asInt();
         if (node.isLong()) return node.asLong();
@@ -89,6 +107,6 @@ public class J2JDeserializer {
             return createShallow(node);
         }
 
-        throw new RuntimeException("Unsupported type: " + node);
+        throw new J2JDeserializationException("Unsupported JSON type during deserialization: " + node);
     }
 }
