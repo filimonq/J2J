@@ -80,6 +80,20 @@ public class PersistenceManager {
         }
         validatePersistent(obj.getClass());
 
+        for (Field field : obj.getClass().getDeclaredFields()) {
+            if (field.isAnnotationPresent(j2j.annotation.Reference.class)) {
+                field.setAccessible(true);
+                try {
+                    Object referencedObj = field.get(obj);
+                    if (referencedObj != null) {
+                        save(referencedObj);
+                    }
+                } catch (IllegalAccessException e) {
+                    throw new j2j.serializer.J2JSerializationException("Failed to access reference field: " + field.getName(), e);
+                }
+            }
+        }
+
         Long id = extractIdSafely(obj);
         if (id == null) {
             id = idStrategy.generateId();
@@ -202,44 +216,53 @@ public class PersistenceManager {
         return maxId;
     }
 
-    public List<Object> loadWithFilter(JsonFilter filter) {
+    public <T> List<T> loadWithFilter(Class<T> clazz, JsonFilter filter) {
+        String targetType = clazz.getSimpleName();
         Map<Long, JsonNode> allNodes = new HashMap<>();
-        List<JsonNode> filteredNodes = new ArrayList<>();
+        List<Long> targetIds = new ArrayList<>();
 
         try (var lines = storage.streamLines()) {
             lines.filter(line -> !line.isBlank()).forEach(line -> {
                 try {
                     JsonNode node = mapper.readTree(line);
-                    allNodes.put(node.get("id").asLong(), node);
-                    if (filter.matches(node)) {
-                        filteredNodes.add(node);
+                    Long id = node.get("id").asLong();
+                    allNodes.put(id, node);
+
+                    if (node.get("type").asText().equals(targetType) && filter.matches(node)) {
+                        targetIds.add(id);
                     }
                 } catch (Exception e) {
-                    throw new RuntimeException("JSON error", e);
+                    throw new RuntimeException("Failed to parse JSON line", e);
                 }
             });
 
-            for (JsonNode node : filteredNodes) {
-                Object obj = deserializer.createShallow(node);
-                cache.put(node.get("id").asLong(), obj);
-            }
-
-            for (JsonNode node : filteredNodes) {
-                resolveDependencies(node, allNodes);
-            }
-
-            List<Object> result = new ArrayList<>();
-            for (JsonNode node : filteredNodes) {
-                Long id = node.get("id").asLong();
-                Object obj = cache.get(id);
-                deserializer.resolveReferences(obj, node);
-                result.add(obj);
+            List<T> result = new ArrayList<>();
+            for (Long id : targetIds) {
+                T obj = clazz.cast(getOrLoad(id, allNodes));
+                if (obj != null) {
+                    result.add(obj);
+                }
             }
             return result;
 
         } catch (Exception e) {
             throw new RuntimeException("Filter loading failed", e);
         }
+    }
+
+    private Object getOrLoad(Long id, Map<Long, JsonNode> allNodes) {
+        if (cache.containsKey(id)) return cache.get(id);
+
+        JsonNode node = allNodes.get(id);
+        if (node == null) return null;
+
+        Object obj = deserializer.createShallow(node);
+        cache.put(id, obj);
+
+        resolveDependencies(node, allNodes);
+        deserializer.resolveReferences(obj, node);
+
+        return obj;
     }
 
     private void resolveDependencies(JsonNode node, Map<Long, JsonNode> allNodes) {
