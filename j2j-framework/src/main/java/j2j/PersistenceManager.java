@@ -265,6 +265,35 @@ public class PersistenceManager {
         return obj;
     }
 
+    public JsonNode findNodeById(Long id) {
+        List<String> lines = storage.readAllLines();
+
+        JsonNode result = null;
+
+        try {
+            for (String line : lines) {
+                if (line.isBlank()) continue;
+
+                JsonNode node = mapper.readTree(line);
+                JsonNode idNode = node.get("id");
+
+                if (idNode != null && !idNode.isNull()) {
+                    if (idNode.asLong() == id) {
+                        result = node;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("findNodeById failed", e);
+        }
+
+        if (result == null) {
+            return null;
+        }
+
+        return result;
+    }
+
     private void resolveDependencies(JsonNode node, Map<Long, JsonNode> allNodes) {
         try {
             for (Field field : getClassFields(node)) {

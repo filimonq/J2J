@@ -29,9 +29,13 @@ public class Main {
         Fullname fn3 = new Fullname("Ivan", "Ivanov");
         UserTest u3 = new UserTest(fn3, 222, true);
 
+        Fullname fn4 = new Fullname("Ivan", "Ivanov");
+        User u4 = new User(fn4, 20, true);
+
         manager.save(u1);
         manager.save(u2);
         manager.save(u3);
+        manager.save(u4);
 
         u1.setAge(10);
         manager.save(u1);
@@ -78,6 +82,24 @@ public class Main {
         for (User u : youngActiveUsers) {
             System.out.println("Found Young Active User: " + u.getName().name + ", age: " + u.getAge());
         }
+
+        System.out.println("\n--- 4. Testing NESTED FILTER (name.name = Ivan) ---");
+
+        JsonFilter nestedFilter =
+                new PathEqualsFilter("name.name", "Ivan", filterManager);
+
+        List<User> usersWithIvanName =
+                filterManager.loadWithFilter(User.class, nestedFilter);
+
+        for (User u : usersWithIvanName) {
+            System.out.println(
+                    "Found User with nested name: "
+                            + u.getName().name + " "
+                            + u.getName().surname
+                            + ", age: " + u.getAge()
+            );
+        }
+
 
         System.out.println("\n=== SUCCESSFULLY ===");
     }
