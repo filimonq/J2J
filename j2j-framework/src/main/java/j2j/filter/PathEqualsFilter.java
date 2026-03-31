@@ -30,7 +30,6 @@ public class PathEqualsFilter implements JsonFilter {
                 Field field = currentClass.getDeclaredField(fieldName);
                 field.setAccessible(true);
 
-                // 🔥 если reference
                 if (field.isAnnotationPresent(Reference.class)) {
                     String refKey = fieldName + "Id";
                     JsonNode refNode = currentNode.get(refKey);
@@ -43,7 +42,6 @@ public class PathEqualsFilter implements JsonFilter {
                     currentClass = resolveClass(currentNode);
 
                 } else {
-                    // обычное поле
                     currentNode = currentNode.get(fieldName);
                     if (currentNode == null) return false;
                 }
