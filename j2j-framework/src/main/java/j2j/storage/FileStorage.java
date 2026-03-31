@@ -8,6 +8,7 @@ import java.nio.file.StandardOpenOption;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Stream;
+import java.util.function.Consumer;
 
 /**
  * Low-level file I/O for JSONL storage.
@@ -29,11 +30,12 @@ public class FileStorage {
         }
         this.filePath = filePath;
     }
-    public Stream<String> streamLines() {
-        try {
-            return Files.lines(filePath);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+
+    public void processStream(Consumer<Stream<String>> processor) {
+        try (Stream<String> stream = Files.lines(filePath)) {
+            processor.accept(stream);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to stream lines from storage", e);
         }
     }
     /**

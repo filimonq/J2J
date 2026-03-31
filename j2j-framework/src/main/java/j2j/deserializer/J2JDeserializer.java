@@ -11,7 +11,6 @@ public class J2JDeserializer {
 
     private final PersistenceManager manager;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final String basePackage = "j2j.model";
 
     public J2JDeserializer(PersistenceManager manager) {
         this.manager = manager;
@@ -28,7 +27,7 @@ public class J2JDeserializer {
         Object instance;
 
         try {
-            clazz = Class.forName(basePackage + "." + type);
+            clazz = Class.forName(type);
             instance = clazz.getDeclaredConstructor().newInstance();
         } catch (Exception e) {
             throw new J2JDeserializationException(
@@ -97,16 +96,26 @@ public class J2JDeserializer {
     }
 
     private Object deserializeValue(Class<?> fieldType, JsonNode node) {
-        if (node.isTextual()) return node.asText();
-        if (node.isInt()) return node.asInt();
-        if (node.isLong()) return node.asLong();
-        if (node.isDouble()) return node.asDouble();
-        if (node.isBoolean()) return node.asBoolean();
+        if (fieldType == int.class || fieldType == Integer.class) {
+            return node.asInt();
+        }
+        if (fieldType == long.class || fieldType == Long.class) {
+            return node.asLong();
+        }
+        if (fieldType == double.class || fieldType == Double.class) {
+            return node.asDouble();
+        }
+        if (fieldType == boolean.class || fieldType == Boolean.class) {
+            return node.asBoolean();
+        }
+        if (fieldType == String.class) {
+            return node.asText();
+        }
 
         if (node.isObject()) {
             return createShallow(node);
         }
 
-        throw new J2JDeserializationException("Unsupported JSON type during deserialization: " + node);
+        throw new J2JDeserializationException("Unsupported JSON type for field " + fieldType.getSimpleName());
     }
 }
