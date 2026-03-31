@@ -56,6 +56,6 @@ public class PathEqualsFilter implements JsonFilter {
 
     private Class<?> resolveClass(JsonNode node) throws ClassNotFoundException {
         String type = node.get("type").asText();
-        return Class.forName("j2j.model." + type);
+        return Class.forName(type);
     }
 }
