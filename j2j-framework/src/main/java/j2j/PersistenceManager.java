@@ -217,11 +217,11 @@ public class PersistenceManager {
     }
 
     public <T> List<T> loadWithFilter(Class<T> clazz, JsonFilter filter) {
-        String targetType = clazz.getSimpleName();
+        String targetType = clazz.getName();
         Map<Long, JsonNode> allNodes = new HashMap<>();
         List<Long> targetIds = new ArrayList<>();
 
-        try (var lines = storage.streamLines()) {
+        storage.processStream(lines -> {
             lines.filter(line -> !line.isBlank()).forEach(line -> {
                 try {
                     JsonNode node = mapper.readTree(line);
@@ -235,19 +235,16 @@ public class PersistenceManager {
                     throw new RuntimeException("Failed to parse JSON line", e);
                 }
             });
+        });
 
-            List<T> result = new ArrayList<>();
-            for (Long id : targetIds) {
-                T obj = clazz.cast(getOrLoad(id, allNodes));
-                if (obj != null) {
-                    result.add(obj);
-                }
+        List<T> result = new ArrayList<>();
+        for (Long id : targetIds) {
+            T obj = clazz.cast(getOrLoad(id, allNodes));
+            if (obj != null) {
+                result.add(obj);
             }
-            return result;
-
-        } catch (Exception e) {
-            throw new RuntimeException("Filter loading failed", e);
         }
+        return result;
     }
 
     private Object getOrLoad(Long id, Map<Long, JsonNode> allNodes) {
@@ -295,7 +292,7 @@ public class PersistenceManager {
     private Field[] getClassFields(JsonNode node) {
         try {
             String type = node.get("type").asText();
-            Class<?> clazz = Class.forName("j2j.model." + type);
+            Class<?> clazz = Class.forName(type);
             return clazz.getDeclaredFields();
         } catch (Exception e) {
             throw new RuntimeException("Failed to get class fields", e);

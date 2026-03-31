@@ -6,7 +6,6 @@ import j2j.annotation.Reference;
 
 @Persistent
 public class User {
-
     @Id
     private Long id;
     @Reference

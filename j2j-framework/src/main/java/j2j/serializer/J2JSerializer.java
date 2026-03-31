@@ -36,8 +36,7 @@ public class J2JSerializer {
 
         try {
             ObjectNode node = mapper.createObjectNode();
-            node.put("type", clazz.getSimpleName());
-
+            node.put("type", clazz.getName());
             idField.setAccessible(true);
             Long idValue = (Long) idField.get(obj);
 
@@ -115,7 +114,7 @@ public class J2JSerializer {
         ObjectNode node = mapper.createObjectNode();
         Class<?> clazz = obj.getClass();
 
-        node.put("type", clazz.getSimpleName());
+        node.put("type", clazz.getName());
 
         for (Field field : clazz.getDeclaredFields()) {
             if (field.isAnnotationPresent(Id.class)) continue;
